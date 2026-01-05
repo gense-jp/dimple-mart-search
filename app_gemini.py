@@ -45,18 +45,17 @@ def get_exchange_rates():
     return rates
 
 # ==========================================
-# 1. 画像認識 (Gemini 1.5 Flash 指定)
+# 1. 画像認識 (モデル名を修正)
 # ==========================================
-# ★キャッシュ機能: 同じ画像ならAPIを消費せず結果を返す
 @st.cache_data(show_spinner=False)
 def get_product_keyword(image_bytes):
     try:
         pil_image = Image.open(io.BytesIO(image_bytes))
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # ★ここが修正点: "gemini-1.5-flash" を指名買い！
-        # これで無料枠が大幅に増えます（1日1500回リクエストOK）
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        # ★ここが修正点: あなたのリストにあった「gemini-flash-latest」を指定
+        # これなら確実に存在し、かつ安定版につながります
+        model = genai.GenerativeModel("gemini-flash-latest")
         
         prompt = """
         Analyze this image and provide the best "English search keywords" for eBay.
@@ -158,7 +157,6 @@ else:
 if uploaded_file is not None:
     st.image(uploaded_file, caption="解析対象", width=200)
     
-    # 画像データをバイト列として取得（キャッシュキーにするため）
     image_bytes = uploaded_file.getvalue()
     
     with st.spinner('🔍 AIが商品を解析中...'):
