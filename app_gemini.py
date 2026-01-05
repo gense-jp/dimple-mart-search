@@ -56,7 +56,7 @@ def get_product_keyword(uploaded_image):
 
     # ★ここが変更点: 安定版の書き方
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-1.5-pro")
     
     prompt = """
     Analyze this image and provide the best "English search keywords" for eBay.
@@ -290,4 +290,5 @@ if uploaded_file is not None:
         else:
 
             st.warning("データが見つかりませんでした。")
+
 
