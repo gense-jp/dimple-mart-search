@@ -45,29 +45,52 @@ def get_exchange_rates():
     return rates
 
 # ==========================================
-# 1. 画像認識 (Gemini 1.5 Flash)
+# 1. 画像認識 (モデル自動探索機能付き)
 # ==========================================
-# 新しいキーなら、この標準モデルが最も安定して動きます
 @st.cache_data(show_spinner=False)
 def get_product_keyword(image_bytes):
-    try:
-        pil_image = Image.open(io.BytesIO(image_bytes))
-        genai.configure(api_key=GEMINI_API_KEY)
-        
-        # ★ここがポイント: 新しいキーなので堂々と標準版を使います
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        
-        prompt = """
-        Analyze this image and provide the best "English search keywords" for eBay.
-        Format: Brand ModelName ProductName.
-        No extra text.
-        Example: Sony WH-1000XM5 Black
-        """
-        
-        response = model.generate_content([pil_image, prompt])
-        return response.text.strip()
-    except Exception as e:
-        return f"Error: {str(e)}"
+    pil_image = Image.open(io.BytesIO(image_bytes))
+    genai.configure(api_key=GEMINI_API_KEY)
+    
+    # ★ここがポイント: 使える可能性のあるモデルを全部リストアップ
+    # 上から順番に試して、繋がったものを使います。
+    candidate_models = [
+        "gemini-1.5-flash",          # 最新の標準
+        "gemini-1.5-flash-latest",   # 表記揺れ対応
+        "gemini-1.5-flash-001",      # バージョン指定
+        "gemini-1.5-pro",            # Pro版
+        "gemini-pro-vision",         # 旧安定版 (これなら絶対にあるはず)
+        "gemini-1.0-pro-vision-latest"
+    ]
+    
+    last_error = ""
+    
+    for model_name in candidate_models:
+        try:
+            # モデルを設定
+            model = genai.GenerativeModel(model_name)
+            
+            prompt = """
+            Analyze this image and provide the best "English search keywords" for eBay.
+            Format: Brand ModelName ProductName.
+            No extra text.
+            Example: Sony WH-1000XM5 Black
+            """
+            
+            # 生成実行
+            response = model.generate_content([pil_image, prompt])
+            
+            # 成功したらログに残して結果を返す
+            print(f"Connected to: {model_name}")
+            return response.text.strip()
+            
+        except Exception as e:
+            # 失敗したら次へ
+            last_error = str(e)
+            continue
+            
+    # 全滅した場合
+    return f"Error: どのモデルにも接続できませんでした。\n詳細: {last_error}"
 
 # ==========================================
 # 2. eBay検索
@@ -164,6 +187,7 @@ if uploaded_file is not None:
     
     if "Error:" in keyword:
         st.error(f"AI解析エラー: {keyword}")
+        st.warning("⚠️ ヒント: requirements.txt が更新されていない可能性があります。")
     else:
         st.success(f"検索ワード: **{keyword}**")
         
