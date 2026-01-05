@@ -45,29 +45,48 @@ def get_exchange_rates():
     return rates
 
 # ==========================================
-# 1. 画像認識 (Stable Version)
+# 1. 画像認識 (自動フォールバック機能付き)
 # ==========================================
 def get_product_keyword(uploaded_image):
-    # 画像データを読み込み
     image_bytes = uploaded_image.getvalue()
     pil_image = Image.open(io.BytesIO(image_bytes))
 
-    # APIキーを設定
     genai.configure(api_key=GEMINI_API_KEY)
     
-    # モデルを指定 (Gemini 1.5 Flash)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    # ★修正ポイント: 使えるモデルを順番に試す
+    # 1.5 Flash (最新) -> 1.5 Pro (高性能) -> Pro Vision (旧安定版)
+    model_candidates = [
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-flash-001",
+        "gemini-1.5-pro",
+        "gemini-pro-vision"
+    ]
     
-    prompt = """
-    Analyze this image and provide the best "English search keywords" for eBay.
-    Format: Brand ModelName ProductName.
-    No extra text.
-    Example: Sony WH-1000XM5 Black
-    """
-    
-    # 生成実行
-    response = model.generate_content([pil_image, prompt])
-    return response.text.strip()
+    response = None
+    used_model = ""
+
+    for model_name in model_candidates:
+        try:
+            model = genai.GenerativeModel(model_name)
+            prompt = """
+            Analyze this image and provide the best "English search keywords" for eBay.
+            Format: Brand ModelName ProductName.
+            No extra text.
+            Example: Sony WH-1000XM5 Black
+            """
+            # エラーが出なければここで成功
+            response = model.generate_content([pil_image, prompt])
+            used_model = model_name
+            break # 成功したらループを抜ける
+        except Exception:
+            continue # ダメなら次のモデルへ
+            
+    if response:
+        print(f"成功: {used_model} を使用しました") # ログ確認用
+        return response.text.strip()
+    else:
+        return "Error: No compatible AI model found."
 
 # ==========================================
 # 2. eBay検索
@@ -290,6 +309,7 @@ if uploaded_file is not None:
         else:
 
             st.warning("データが見つかりませんでした。")
+
 
 
 
