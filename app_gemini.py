@@ -62,7 +62,7 @@ def get_product_keyword(uploaded_image):
     """
     
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-1.5-flash",
         contents=[pil_image, prompt]
     )
     return response.text.strip()
@@ -286,4 +286,5 @@ if uploaded_file is not None:
                     st.error("❌ 販売実績なし")
 
         else:
+
             st.warning("データが見つかりませんでした。")
