@@ -27,7 +27,7 @@ COUNTRY_CONFIG = {
 }
 
 # ==========================================
-# 0. 為替レート一括取得 (キャッシュ有効)
+# 0. 為替レート一括取得
 # ==========================================
 @st.cache_data(ttl=3600)
 def get_exchange_rates():
@@ -45,51 +45,29 @@ def get_exchange_rates():
     return rates
 
 # ==========================================
-# 1. 画像認識 (診断ログにあったモデルを優先)
+# 1. 画像認識 (Gemini 1.5 Flash)
 # ==========================================
+# 新しいキーなら、この標準モデルが最も安定して動きます
 @st.cache_data(show_spinner=False)
 def get_product_keyword(image_bytes):
-    pil_image = Image.open(io.BytesIO(image_bytes))
-    genai.configure(api_key=GEMINI_API_KEY)
-    
-    # ★修正点: あなたの診断ログに存在した「実験版(exp)」を優先します
-    # これらは制限が緩いことが多いです
-    candidate_models = [
-        "gemini-2.0-flash-exp",             # 第一候補: 2.0の実験版 (高速・高性能)
-        "gemini-2.0-flash-lite-preview-02-05", # 第二候補: 軽量版プレビュー
-        "gemini-exp-1206",                  # 第三候補: 12月版実験モデル
-        "gemini-1.5-flash",                 # 念のため標準版
-        "gemini-1.5-flash-latest"           # 念のため標準最新
-    ]
-    
-    error_log = []
-    
-    for model_name in candidate_models:
-        try:
-            # モデルをセット
-            model = genai.GenerativeModel(model_name)
-            
-            prompt = """
-            Analyze this image and provide the best "English search keywords" for eBay.
-            Format: Brand ModelName ProductName.
-            No extra text.
-            Example: Sony WH-1000XM5 Black
-            """
-            
-            # 生成実行
-            response = model.generate_content([pil_image, prompt])
-            
-            # 成功したらループを抜けて結果を返す
-            return response.text.strip()
-            
-        except Exception as e:
-            # 失敗したらエラーを記録して次へ
-            error_log.append(f"{model_name}: {str(e)}")
-            continue
-    
-    # 全滅した場合
-    error_msg = "\n".join(error_log)
-    return f"Error: すべてのAIモデルで解析に失敗しました。\n詳細:\n{error_msg}"
+    try:
+        pil_image = Image.open(io.BytesIO(image_bytes))
+        genai.configure(api_key=GEMINI_API_KEY)
+        
+        # ★ここがポイント: 新しいキーなので堂々と標準版を使います
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        
+        prompt = """
+        Analyze this image and provide the best "English search keywords" for eBay.
+        Format: Brand ModelName ProductName.
+        No extra text.
+        Example: Sony WH-1000XM5 Black
+        """
+        
+        response = model.generate_content([pil_image, prompt])
+        return response.text.strip()
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 # ==========================================
 # 2. eBay検索
@@ -185,8 +163,7 @@ if uploaded_file is not None:
         keyword = get_product_keyword(image_bytes)
     
     if "Error:" in keyword:
-        st.error(keyword)
-        st.warning("⚠️ 解決策: 時間をおいて試すか、Secretsのキーを作り直してみてください。")
+        st.error(f"AI解析エラー: {keyword}")
     else:
         st.success(f"検索ワード: **{keyword}**")
         
