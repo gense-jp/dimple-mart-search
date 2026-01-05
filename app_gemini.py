@@ -45,20 +45,20 @@ def get_exchange_rates():
     return rates
 
 # ==========================================
-# 1. 画像認識 (高精度・強化版)
+# 1. 画像認識 (英語強制モード)
 # ==========================================
 @st.cache_data(show_spinner=False)
 def get_product_keyword(image_bytes):
     pil_image = Image.open(io.BytesIO(image_bytes))
     genai.configure(api_key=GEMINI_API_KEY)
     
-    # ★ここを修正：賢いモデル順に並び替えました
+    # 賢い順にモデルを指名
     candidate_models = [
-        "gemini-2.0-flash",          # 本命：賢くて制限も緩い標準版
-        "gemini-2.0-flash-exp",      # 次点：実験版（かなり賢い）
-        "gemini-flash-latest",       # 汎用最新
-        "gemini-1.5-pro",            # Pro版（あれば最強だが遅い）
-        "gemini-2.0-flash-lite-preview-02-05" # 保険：Lite版
+        "gemini-2.0-flash",          
+        "gemini-2.0-flash-exp",      
+        "gemini-flash-latest",       
+        "gemini-1.5-pro",            
+        "gemini-2.0-flash-lite-preview-02-05"
     ]
     
     last_error = ""
@@ -67,19 +67,26 @@ def get_product_keyword(image_bytes):
         try:
             model = genai.GenerativeModel(model_name)
             
-            # ★プロンプト強化：より詳細に読み取るよう命令
+            # ★ここを修正: 日本語を徹底的に禁止し、英語のみを強制する命令
             prompt = """
-            Identify this product in extreme detail for eBay search.
-            Include: Brand, Specific Model Number (if visible), Series Name, and Color.
-            Ignore background objects.
-            Output ONLY the search keywords string.
-            Example: Sony WH-1000XM5 Noise Canceling Headphones Black
+            Analyze this product image for eBay listing.
+            
+            [CRITICAL INSTRUCTIONS]
+            1. Output MUST be in **ENGLISH ONLY**.
+            2. Do NOT use Japanese or any other language.
+            3. Identify Brand, Model Number (very important), and Product Name.
+            4. Output ONLY the keywords string.
+            
+            Example Input: (Image of a Sony camera)
+            Example Output: Sony Alpha a7 IV Mirrorless Camera Body
             """
             
             response = model.generate_content([pil_image, prompt])
             
-            # 成功したら結果を返す
-            return response.text.strip()
+            # 念のため、結果が空でなければ返す
+            text = response.text.strip()
+            if text:
+                return text
             
         except Exception as e:
             last_error = str(e)
@@ -177,13 +184,15 @@ if uploaded_file is not None:
     
     image_bytes = uploaded_file.getvalue()
     
-    with st.spinner('🔍 AIが商品を解析中 (高精度モード)...'):
+    with st.spinner('🔍 AIが商品を解析中...'):
         keyword = get_product_keyword(image_bytes)
     
     if "Error:" in keyword:
         st.error(f"AI解析エラー: {keyword}")
     else:
-        st.success(f"検索ワード: **{keyword}**")
+        # 結果を表示（万が一日本語が混ざっていても編集可能にしておく）
+        st.success("✅ AI解析完了")
+        keyword = st.text_input("検索ワード (必要に応じて修正)", value=keyword)
         
         btn_label = "世界価格をリサーチ (出品中)" if mode_key == "Active" else f"販売実績を確認 (過去{days_ago}日)"
         
