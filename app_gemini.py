@@ -5,7 +5,6 @@ import google.generativeai as genai
 from PIL import Image
 import io
 from datetime import datetime, timedelta, timezone
-import time
 
 # ==========================================
 # 設定エリア
@@ -46,25 +45,24 @@ def get_exchange_rates():
     return rates
 
 # ==========================================
-# 1. 画像認識 (自動フォールバック機能付き)
+# 1. 画像認識 (診断ログにあったモデルを優先)
 # ==========================================
-# キャッシュ有効: 同じ画像ならAPIを消費せず結果を返す
 @st.cache_data(show_spinner=False)
 def get_product_keyword(image_bytes):
     pil_image = Image.open(io.BytesIO(image_bytes))
     genai.configure(api_key=GEMINI_API_KEY)
     
-    # ★ここが重要: 制限の緩い「1.5系」を優先的に試すリスト
-    # 2.5系 (latest) は制限がきついのでリストに入れません
+    # ★修正点: あなたの診断ログに存在した「実験版(exp)」を優先します
+    # これらは制限が緩いことが多いです
     candidate_models = [
-        "gemini-1.5-flash",          # 本命 (動けば最強)
-        "gemini-1.5-flash-latest",   # 1.5の最新
-        "gemini-1.5-flash-001",      # バージョン指定
-        "gemini-1.5-flash-002",      # バージョン指定
-        "gemini-pro-vision",         # 旧安定版
+        "gemini-2.0-flash-exp",             # 第一候補: 2.0の実験版 (高速・高性能)
+        "gemini-2.0-flash-lite-preview-02-05", # 第二候補: 軽量版プレビュー
+        "gemini-exp-1206",                  # 第三候補: 12月版実験モデル
+        "gemini-1.5-flash",                 # 念のため標準版
+        "gemini-1.5-flash-latest"           # 念のため標準最新
     ]
     
-    last_error = ""
+    error_log = []
     
     for model_name in candidate_models:
         try:
@@ -81,16 +79,17 @@ def get_product_keyword(image_bytes):
             # 生成実行
             response = model.generate_content([pil_image, prompt])
             
-            # ここまで来れば成功！
+            # 成功したらループを抜けて結果を返す
             return response.text.strip()
             
         except Exception as e:
-            # 失敗したら次のモデルを試す
-            last_error = str(e)
+            # 失敗したらエラーを記録して次へ
+            error_log.append(f"{model_name}: {str(e)}")
             continue
     
-    # 全部ダメだった場合
-    return f"Error: AI解析に失敗しました。({last_error})"
+    # 全滅した場合
+    error_msg = "\n".join(error_log)
+    return f"Error: すべてのAIモデルで解析に失敗しました。\n詳細:\n{error_msg}"
 
 # ==========================================
 # 2. eBay検索
@@ -187,7 +186,7 @@ if uploaded_file is not None:
     
     if "Error:" in keyword:
         st.error(keyword)
-        st.warning("⚠️ 解決策: Streamlit Cloudの 'Manage app' -> 'Clear cache' を試してみてください。")
+        st.warning("⚠️ 解決策: 時間をおいて試すか、Secretsのキーを作り直してみてください。")
     else:
         st.success(f"検索ワード: **{keyword}**")
         
