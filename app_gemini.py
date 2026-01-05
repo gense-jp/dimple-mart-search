@@ -45,51 +45,47 @@ def get_exchange_rates():
     return rates
 
 # ==========================================
-# 1. 画像認識 (あなたのリストにあるモデルを指名)
+# 1. 画像認識 (高精度・強化版)
 # ==========================================
 @st.cache_data(show_spinner=False)
 def get_product_keyword(image_bytes):
     pil_image = Image.open(io.BytesIO(image_bytes))
     genai.configure(api_key=GEMINI_API_KEY)
     
-    # ★修正点: 診断リストに「確実に存在した」モデルのみを候補にします
-    # 制限の緩い「Lite」系を優先的に使います
+    # ★ここを修正：賢いモデル順に並び替えました
     candidate_models = [
-        "gemini-2.0-flash-lite-preview-02-05", # 本命 (Lite版)
-        "gemini-2.0-flash-lite",              # Lite版の別名
-        "gemini-2.5-flash-lite",              # 最新のLite版
-        "gemini-flash-lite-latest",           # 最新のLite版
-        "gemini-2.0-flash",                   # Liteがダメなら通常版
-        "gemini-flash-latest"                 # 最終手段
+        "gemini-2.0-flash",          # 本命：賢くて制限も緩い標準版
+        "gemini-2.0-flash-exp",      # 次点：実験版（かなり賢い）
+        "gemini-flash-latest",       # 汎用最新
+        "gemini-1.5-pro",            # Pro版（あれば最強だが遅い）
+        "gemini-2.0-flash-lite-preview-02-05" # 保険：Lite版
     ]
     
     last_error = ""
     
     for model_name in candidate_models:
         try:
-            # モデルを設定
             model = genai.GenerativeModel(model_name)
             
+            # ★プロンプト強化：より詳細に読み取るよう命令
             prompt = """
-            Analyze this image and provide the best "English search keywords" for eBay.
-            Format: Brand ModelName ProductName.
-            No extra text.
-            Example: Sony WH-1000XM5 Black
+            Identify this product in extreme detail for eBay search.
+            Include: Brand, Specific Model Number (if visible), Series Name, and Color.
+            Ignore background objects.
+            Output ONLY the search keywords string.
+            Example: Sony WH-1000XM5 Noise Canceling Headphones Black
             """
             
-            # 生成実行
             response = model.generate_content([pil_image, prompt])
             
-            # 成功したらここを通る
+            # 成功したら結果を返す
             return response.text.strip()
             
         except Exception as e:
-            # 失敗したら次へ
             last_error = str(e)
             continue
     
-    # 全部ダメだった場合
-    return f"Error: 解析失敗。利用可能なモデルが見つかりませんでした。\n詳細: {last_error}"
+    return f"Error: 解析失敗 ({last_error})"
 
 # ==========================================
 # 2. eBay検索
@@ -181,7 +177,7 @@ if uploaded_file is not None:
     
     image_bytes = uploaded_file.getvalue()
     
-    with st.spinner('🔍 AIが商品を解析中...'):
+    with st.spinner('🔍 AIが商品を解析中 (高精度モード)...'):
         keyword = get_product_keyword(image_bytes)
     
     if "Error:" in keyword:
