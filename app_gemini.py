@@ -5,40 +5,6 @@ import google.generativeai as genai
 from PIL import Image
 import io
 from datetime import datetime, timedelta, timezone
-import importlib.metadata # バージョン確認用
-
-# ==========================================
-# 0. 強制診断エリア (画面の一番上に表示されます)
-# ==========================================
-st.set_page_config(layout="wide", page_title="Dimple Mart Global Pro")
-
-with st.expander("🔧 システム診断情報 (エラー時はここを開いてください)", expanded=True):
-    # 1. ライブラリのバージョン確認
-    try:
-        lib_ver = importlib.metadata.version("google-generativeai")
-        st.write(f"📦 インストールされているAIツールのバージョン: **{lib_ver}**")
-        if lib_ver < "0.8.3":
-            st.error("❌ バージョンが古すぎます！requirements.txtが反映されていません。")
-    except:
-        st.error("❌ AIツールがインストールされていません。")
-
-    # 2. APIキーとモデル一覧の確認
-    try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-        genai.configure(api_key=api_key)
-        
-        st.write("📡 Googleサーバーと通信中...")
-        models = genai.list_models()
-        available_models = [m.name for m in models if 'generateContent' in m.supported_generation_methods]
-        
-        st.success(f"✅ 通信成功！利用可能なモデル数: {len(available_models)}")
-        st.code(available_models) # 利用可能なモデル名を全て表示
-        
-    except Exception as e:
-        st.error(f"❌ APIキー認証エラー: {e}")
-        st.write("ヒント: Google Cloud Consoleで 'Generative Language API' が有効になっていない可能性があります。")
-
-st.divider()
 
 # ==========================================
 # 設定エリア
@@ -61,7 +27,7 @@ COUNTRY_CONFIG = {
 }
 
 # ==========================================
-# 関数: 為替レート取得
+# 0. 為替レート一括取得
 # ==========================================
 @st.cache_data(ttl=3600)
 def get_exchange_rates():
@@ -79,47 +45,54 @@ def get_exchange_rates():
     return rates
 
 # ==========================================
-# 関数: 画像認識 (診断結果に基づき自動選択)
+# 1. 画像認識 (あなたのリストにあるモデルを指名)
 # ==========================================
 @st.cache_data(show_spinner=False)
 def get_product_keyword(image_bytes):
     pil_image = Image.open(io.BytesIO(image_bytes))
     genai.configure(api_key=GEMINI_API_KEY)
     
-    # リストアップするモデル（優先度順）
+    # ★修正点: 診断リストに「確実に存在した」モデルのみを候補にします
+    # 制限の緩い「Lite」系を優先的に使います
     candidate_models = [
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash-001",
-        "gemini-1.5-pro",
-        "gemini-2.0-flash-exp", # 実験版も候補に
-        "gemini-pro-vision"
+        "gemini-2.0-flash-lite-preview-02-05", # 本命 (Lite版)
+        "gemini-2.0-flash-lite",              # Lite版の別名
+        "gemini-2.5-flash-lite",              # 最新のLite版
+        "gemini-flash-lite-latest",           # 最新のLite版
+        "gemini-2.0-flash",                   # Liteがダメなら通常版
+        "gemini-flash-latest"                 # 最終手段
     ]
     
     last_error = ""
-    success_model = ""
-
+    
     for model_name in candidate_models:
         try:
+            # モデルを設定
             model = genai.GenerativeModel(model_name)
+            
             prompt = """
             Analyze this image and provide the best "English search keywords" for eBay.
             Format: Brand ModelName ProductName.
             No extra text.
             Example: Sony WH-1000XM5 Black
             """
+            
+            # 生成実行
             response = model.generate_content([pil_image, prompt])
-            success_model = model_name
-            return f"{response.text.strip()}" # 成功
+            
+            # 成功したらここを通る
+            return response.text.strip()
             
         except Exception as e:
+            # 失敗したら次へ
             last_error = str(e)
             continue
-            
-    return f"Error: 解析失敗 (Last error: {last_error})"
+    
+    # 全部ダメだった場合
+    return f"Error: 解析失敗。利用可能なモデルが見つかりませんでした。\n詳細: {last_error}"
 
 # ==========================================
-# 関数: eBay検索
+# 2. eBay検索
 # ==========================================
 def search_ebay_single(keyword, marketplace_id, limit=3, mode="Active", days_ago=30):
     if not EBAY_APP_ID or not EBAY_CERT_ID:
@@ -167,6 +140,8 @@ def search_ebay_single(keyword, marketplace_id, limit=3, mode="Active", days_ago
 # ==========================================
 # メイン画面構築
 # ==========================================
+st.set_page_config(layout="wide", page_title="Dimple Mart Global Pro")
+
 rates = get_exchange_rates()
 usd_to_jpy = rates["JPY"]
 
@@ -190,6 +165,7 @@ with st.sidebar:
     st.write(f"📊 1 USD = {usd_to_jpy:.2f} JPY")
 
 st.title("🛍️ Dimple Mart Global Pro")
+st.write("国別の最安値（送料込み）を比較して、最適な輸出先を見つけます。")
 
 enable_camera = st.checkbox("カメラを起動する")
 uploaded_file = None
@@ -202,15 +178,16 @@ else:
 
 if uploaded_file is not None:
     st.image(uploaded_file, caption="解析対象", width=200)
+    
     image_bytes = uploaded_file.getvalue()
     
     with st.spinner('🔍 AIが商品を解析中...'):
-        result_text = get_product_keyword(image_bytes)
+        keyword = get_product_keyword(image_bytes)
     
-    if "Error:" in result_text:
-        st.error(result_text)
+    if "Error:" in keyword:
+        st.error(f"AI解析エラー: {keyword}")
     else:
-        st.success(f"検索ワード: **{result_text}**")
+        st.success(f"検索ワード: **{keyword}**")
         
         btn_label = "世界価格をリサーチ (出品中)" if mode_key == "Active" else f"販売実績を確認 (過去{days_ago}日)"
         
@@ -220,7 +197,7 @@ if uploaded_file is not None:
             
             for i, country_name in enumerate(selected_countries):
                 config = COUNTRY_CONFIG[country_name]
-                items = search_ebay_single(result_text, config["id"], limit=5, mode=mode_key, days_ago=days_ago)
+                items = search_ebay_single(keyword, config["id"], limit=5, mode=mode_key, days_ago=days_ago)
                 
                 if not items and mode_key == "Sold":
                     all_data.append({
@@ -292,6 +269,7 @@ if uploaded_file is not None:
                     if not valid_rows.empty:
                         st.divider()
                         st.subheader("🌎 国別・最安値一覧 (送料込み)")
+                        st.caption("各国の市場価格（ライバルの最安値）です。")
                         dashboard_cols = st.columns(len(selected_countries))
                         for i, country in enumerate(selected_countries):
                             country_df = valid_rows[valid_rows["国"] == country]
@@ -319,3 +297,12 @@ if uploaded_file is not None:
                     hide_index=True,
                     use_container_width=True
                 )
+                
+                if mode_key == "Sold":
+                    sold_count = len(df[df["トータル(円)"] != "-"])
+                    if sold_count > 0:
+                        st.success(f"✅ 過去{days_ago}日間で {sold_count}件 の販売実績あり")
+                    else:
+                        st.error("❌ 販売実績なし")
+            else:
+                st.warning("データが見つかりませんでした。")
