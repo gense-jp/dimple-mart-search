@@ -7,7 +7,7 @@ import io
 from datetime import datetime, timedelta, timezone
 
 # ==========================================
-# 設定エリア (クラウド対応版)
+# 設定エリア
 # ==========================================
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
@@ -45,17 +45,18 @@ def get_exchange_rates():
     return rates
 
 # ==========================================
-# 1. 画像認識 (キャッシュ有効・安定版モデル)
+# 1. 画像認識 (Gemini 1.5 Flash 指定)
 # ==========================================
-# ★ここが重要: 画像が変わらない限りAIを再呼び出ししない設定
+# ★キャッシュ機能: 同じ画像ならAPIを消費せず結果を返す
 @st.cache_data(show_spinner=False)
 def get_product_keyword(image_bytes):
     try:
         pil_image = Image.open(io.BytesIO(image_bytes))
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # ★診断リストにあった汎用エイリアスを使用 (最も安定したFlashモデルに繋がる)
-        model = genai.GenerativeModel("gemini-flash-latest")
+        # ★ここが修正点: "gemini-1.5-flash" を指名買い！
+        # これで無料枠が大幅に増えます（1日1500回リクエストOK）
+        model = genai.GenerativeModel("gemini-1.5-flash")
         
         prompt = """
         Analyze this image and provide the best "English search keywords" for eBay.
@@ -161,7 +162,6 @@ if uploaded_file is not None:
     image_bytes = uploaded_file.getvalue()
     
     with st.spinner('🔍 AIが商品を解析中...'):
-        # キャッシュが効くので、2回目以降はAI通信が発生しません
         keyword = get_product_keyword(image_bytes)
     
     if "Error:" in keyword:
@@ -244,16 +244,13 @@ if uploaded_file is not None:
             if all_data:
                 df = pd.DataFrame(all_data)
                 
-                # --- 国別最安値ダッシュボード (Activeモードのみ) ---
                 if mode_key == "Active":
                     valid_rows = df[df["トータル(円)"] != "-"]
                     if not valid_rows.empty:
                         st.divider()
                         st.subheader("🌎 国別・最安値一覧 (送料込み)")
                         st.caption("各国の市場価格（ライバルの最安値）です。")
-                        
                         dashboard_cols = st.columns(len(selected_countries))
-                        
                         for i, country in enumerate(selected_countries):
                             country_df = valid_rows[valid_rows["国"] == country]
                             with dashboard_cols[i]:
@@ -265,7 +262,6 @@ if uploaded_file is not None:
                                     st.metric(label=country, value="なし")
                         st.divider()
 
-                # --- メインの表表示 ---
                 st.write("### 詳細データ一覧")
                 cols = ["国", "トータル(円)", "詳細(現地通貨)", "商品タイトル", "リンク"]
                 if mode_key == "Sold":
@@ -288,6 +284,5 @@ if uploaded_file is not None:
                         st.success(f"✅ 過去{days_ago}日間で {sold_count}件 の販売実績あり")
                     else:
                         st.error("❌ 販売実績なし")
-
             else:
                 st.warning("データが見つかりませんでした。")
