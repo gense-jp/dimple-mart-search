@@ -138,4 +138,151 @@ with st.sidebar:
     
     st.divider()
     default_countries = ["🇺🇸 アメリカ", "🇬🇧 イギリス", "🇫🇷 フランス", "🇩🇪 ドイツ", "🇦🇺 オーストラリア"]
-    selected_countries = st.multiselect("検索対象の国", list(COUNTRY_CONFIG.keys()), default=
+    selected_countries = st.multiselect("検索対象の国", list(COUNTRY_CONFIG.keys()), default=default_countries)
+    st.divider()
+    st.write(f"📊 1 USD = {usd_to_jpy:.2f} JPY")
+
+st.title("🛍️ Dimple Mart Global Pro")
+st.write("国別の最安値（送料込み）を比較して、最適な輸出先を見つけます。")
+
+enable_camera = st.checkbox("カメラを起動する")
+uploaded_file = None
+
+if enable_camera:
+    picture = st.camera_input("商品を撮影")
+    if picture: uploaded_file = picture
+else:
+    uploaded_file = st.file_uploader("写真を選択", type=["jpg", "png", "jpeg"])
+
+if uploaded_file is not None:
+    st.image(uploaded_file, caption="解析対象", width=200)
+    
+    with st.spinner('🔍 AIが商品を解析中 (Gemini 2.5 Flash)...'):
+        try:
+            keyword = get_product_keyword(uploaded_file)
+            st.success(f"検索ワード: **{keyword}**")
+            
+            btn_label = "世界価格をリサーチ (出品中)" if mode_key == "Active" else f"販売実績を確認 (過去{days_ago}日)"
+            
+            if st.button(btn_label, type="primary"):
+                all_data = []
+                progress_bar = st.progress(0)
+                
+                for i, country_name in enumerate(selected_countries):
+                    config = COUNTRY_CONFIG[country_name]
+                    items = search_ebay_single(keyword, config["id"], limit=5, mode=mode_key, days_ago=days_ago)
+                    
+                    if not items and mode_key == "Sold":
+                        all_data.append({
+                            "国": country_name,
+                            "商品タイトル": "⚠️ 販売実績なし",
+                            "トータル(円)": "-",
+                            "詳細(現地通貨)": "-",
+                            "リンク": "#",
+                            "sort_price": 99999999
+                        })
+                        continue
+
+                    for item in items:
+                        title = item.get("title", "No Title")
+                        url = item.get("itemWebUrl", item.get("url"))
+                        
+                        price_info = item.get("price", {})
+                        item_price = float(price_info.get("value", 0))
+                        currency = price_info.get("currency", "USD")
+                        
+                        shipping_cost = 0.0
+                        shipping_opts = item.get("shippingOptions", [])
+                        if shipping_opts:
+                            first_opt = shipping_opts[0]
+                            ship_cost_info = first_opt.get("shippingCost", {})
+                            shipping_cost = float(ship_cost_info.get("value", 0))
+                        
+                        total_local = item_price + shipping_cost
+                        rate_to_usd = rates.get(currency, 1.0)
+                        if currency == "USD":
+                            total_usd = total_local
+                        else:
+                            total_usd = total_local / rate_to_usd if rate_to_usd else 0
+                        
+                        total_jpy = total_usd * usd_to_jpy
+                        
+                        detail_text = f"{item_price:.2f} + 送{shipping_cost:.2f} {currency}"
+                        
+                        date_display = ""
+                        if mode_key == "Sold":
+                            sold_date_raw = item.get("soldDate") or item.get("itemEndDate", "")
+                            if sold_date_raw:
+                                date_display = sold_date_raw[:10]
+                            else:
+                                date_display = "-"
+
+                        data_row = {
+                            "国": country_name,
+                            "商品タイトル": title,
+                            "トータル(円)": f"¥{int(total_jpy):,}",
+                            "詳細(現地通貨)": detail_text,
+                            "リンク": url,
+                            "sort_price": total_jpy
+                        }
+                        if mode_key == "Sold":
+                            data_row["販売日"] = date_display
+                            
+                        all_data.append(data_row)
+                    
+                    progress_bar.progress((i + 1) / len(selected_countries))
+                
+                progress_bar.empty()
+                
+                if all_data:
+                    df = pd.DataFrame(all_data)
+                    
+                    # --- 国別最安値ダッシュボード (Activeモードのみ) ---
+                    if mode_key == "Active":
+                        valid_rows = df[df["トータル(円)"] != "-"]
+                        if not valid_rows.empty:
+                            st.divider()
+                            st.subheader("🌎 国別・最安値一覧 (送料込み)")
+                            st.caption("各国の市場価格（ライバルの最安値）です。")
+                            
+                            dashboard_cols = st.columns(len(selected_countries))
+                            
+                            for i, country in enumerate(selected_countries):
+                                country_df = valid_rows[valid_rows["国"] == country]
+                                with dashboard_cols[i]:
+                                    if not country_df.empty:
+                                        best_idx = country_df["sort_price"].idxmin()
+                                        best_price = country_df.loc[best_idx, "トータル(円)"]
+                                        st.metric(label=country, value=best_price)
+                                    else:
+                                        st.metric(label=country, value="なし")
+                            st.divider()
+
+                    # --- メインの表表示 ---
+                    st.write("### 詳細データ一覧")
+                    cols = ["国", "トータル(円)", "詳細(現地通貨)", "商品タイトル", "リンク"]
+                    if mode_key == "Sold":
+                        cols.insert(1, "販売日")
+                    
+                    st.data_editor(
+                        df[cols],
+                        column_config={
+                            "リンク": st.column_config.LinkColumn("商品ページ"),
+                            "詳細(現地通貨)": st.column_config.TextColumn("内訳 (本体+送料)"),
+                            "トータル(円)": st.column_config.TextColumn("合計 (円換算)"),
+                        },
+                        hide_index=True,
+                        use_container_width=True
+                    )
+                    
+                    if mode_key == "Sold":
+                        sold_count = len(df[df["トータル(円)"] != "-"])
+                        if sold_count > 0:
+                            st.success(f"✅ 過去{days_ago}日間で {sold_count}件 の販売実績あり")
+                        else:
+                            st.error("❌ 販売実績なし")
+
+                else:
+                    st.warning("データが見つかりませんでした。")
+        except Exception as e:
+            st.error(f"エラーが発生しました: {e}")
