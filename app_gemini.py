@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
-import google.generativeai as genai  # ★ここを変更
+import google.generativeai as genai
 from PIL import Image
 import io
 from datetime import datetime, timedelta, timezone
@@ -9,14 +9,12 @@ from datetime import datetime, timedelta, timezone
 # ==========================================
 # 設定エリア (クラウド対応版)
 # ==========================================
-# GitHubにはキーを上げず、Streamlit Cloudの「Secrets」機能を使います
 try:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     EBAY_APP_ID = st.secrets["EBAY_APP_ID"]
     EBAY_CERT_ID = st.secrets["EBAY_CERT_ID"]
 except:
-    # ローカル(自分のPC)で動かす時用に入力画面を出す、またはエラーにする
-    st.error("APIキーが設定されていません。Streamlit CloudのSecretsを設定してください。")
+    st.error("APIキー設定エラー: Streamlit CloudのSecretsを確認してください。")
     st.stop()
     
 # 検索対象国の定義
@@ -54,9 +52,11 @@ def get_product_keyword(uploaded_image):
     image_bytes = uploaded_image.getvalue()
     pil_image = Image.open(io.BytesIO(image_bytes))
 
-    # ★ここが変更点: 安定版の書き方
+    # APIキーを設定
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-pro")
+    
+    # モデルを指定 (Gemini 1.5 Flash)
+    model = genai.GenerativeModel("gemini-1.5-flash")
     
     prompt = """
     Analyze this image and provide the best "English search keywords" for eBay.
@@ -65,7 +65,7 @@ def get_product_keyword(uploaded_image):
     Example: Sony WH-1000XM5 Black
     """
     
-    # 画像とプロンプトをリストで渡す
+    # 生成実行
     response = model.generate_content([pil_image, prompt])
     return response.text.strip()
 
@@ -290,5 +290,6 @@ if uploaded_file is not None:
         else:
 
             st.warning("データが見つかりませんでした。")
+
 
 
